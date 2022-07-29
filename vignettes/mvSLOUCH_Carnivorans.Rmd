@@ -1,0 +1,155 @@
+---
+title: "Analysis of locomotion and forelimb morphology in carnivorans using the mvSLOUCH R-package"
+author: "Jesualdo Fuentes Gonzalez, Jason Pienaar and Krzysztof Bartoszek"
+date: '`r Sys.Date()`'
+output: 
+  rmarkdown::html_vignette:
+    fig_caption: yes
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Getting started}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: refs_mvSLOUCH.bib
+---
+
+<!--
+# Copyright 2020 Jesualdo Fuentes Gonzalez, Jason Pienaar  and Krzysztof Bartoszek
+#
+# This file is part of mvSLOUCH.
+#
+# mvSLOUCH is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# mvSLOUCH comes AS IS in the hope that it will be useful WITHOUT 
+# ANY WARRANTY, NOT even the implied warranty of MERCHANTABILITY 
+# or FITNESS FOR A PARTICULAR PURPOSE. Please understand that there 
+# may still be bugs and errors. Use it at your own risk. We take no 
+# responsibility for any errors or omissions in this package or 
+# for any misfortune that may befall you or others as a result 
+# of its use. See the  GNU General Public License for more details.
+# Please send comments and report bugs to Krzysztof Bartoszek 
+# at krzbar@protonmail.ch .
+#
+# You should have received a copy of the GNU General Public License
+# along with mvSLOUCH.  If not, see <https://www.gnu.org/licenses/>.
+-->
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+## Code for installation of packages inside vignette taken from PCMBase vignette by Venelin Mitov
+if(!requireNamespace("ggplot2")) {
+  message("Building the vignette requires ggplot2 R-package. Trying to install.")
+  status.ggplot2 <- try({
+    install.packages("ggplot2")
+  }, silent = TRUE)
+  if(class(status.ggplot2 == "try-error")) {
+    stop(
+      "The ggplot2 installation did not succeed. The vignette cannot be built.")
+  }
+}
+```
+
+# Introduction {#section1}
+
+We will explore several attributes of the R [@R] package mvSLOUCH [@KBarJPiePMosSAndTHan2012], 
+that allows fitting multivariate models for phylogenetic comparative data with emphasis on those based on an Ornstein-Uhlenbeck 
+process. Versions of mvSLOUCH from 2.0.0 run models at considerably faster speeds through using the 
+computational engine provided by PCMBase [@VMitKBarGAsiTSta2020], so let us start by attaching mvSLOUCH as well as  
+ggplot2 [@HWic2016], which have some useful functions for data processing and plotting, respectively
+(PCMBase with its suggested PCMBaseCpp, if installed, C++ backend will be loaded by mvSLOUCH): 
+
+```{r}
+library(ggplot2)
+library(ape)
+library(mvSLOUCH)
+```
+
+As a phylogenetic comparative analysis with mvSLOUCH can run a long time, we first load required fragments of the
+precalculated objects. The unreduced objects are the results of the estimation procedures run here with the set random seed.
+We preload them so that building the vignette does not take over a day and we store within mvSLOUCH only the necessary
+parts as the full objects would take up too much space. The complete objects can be found in the 
+[KJVJMRKK_mvSLOUCH GitHub repository](https://github.com/krzbar/KJVJMRKK_mvSLOUCH).
+However, the readers are encouraged to run the presented code by themselves.
+```{r}
+load("./Carnivora_mvSLOUCH_objects.RData")
+```
+
+Using an example on carnivoran locomotion and forelimb morphology, we will explore and compare the basic models of mvSLOUCH, 
+going through some key tasks associated with its inputs (e.g. setting up the data and the phylogeny, specifying selective 
+regimes for adaptive hypotheses) and outputs (e.g. identifying key statistics, optimizing parameter estimates of a preferred model, 
+computing confidence intervals under parametric bootstrap). 
+
+The function `set.seed()` allows specifying a starting point in a sequence of randomly generated numbers so that a user can obtain the 
+same outputs under a given process. For the purposes of the current vignette, if you want to replicate the outputs below (for mvSLOUCH 2.6.2), 
+set up the following seed:
+
+```{r}
+RNGversion(min(as.character(getRversion()),"3.6.1"))
+set.seed(5, kind = "Mersenne-Twister", normal.kind = "Inversion")
+```
+
+# Data: Locomotion and forelimb morphology in carnivorans {#section2}
+
+The order Carnivora has colonized a wide variety of habitats. The specific challenges of moving through these 
+habitats are reflected in the diversity of locomotor strategies they exhibit, such as running fast or for long distances 
+(i.e. cursorial locomotion, such as hyenas and wolves), climbing (e.g. from the scansorial raccoon to the fully arboreal kinkajou) 
+swimming (e.g. from the semiaquatic otter to the fully aquatic seal) and digging (i.e. semifossorial locomotion, such as 
+some skunks and badgers). Although some morphological attributes are useful across  different locomotor types (e.g. swimmers and 
+diggers are similarly benefited by an increased area of the paws and high force outputs of the limbs), others can be at odds with 
+each other. A good example of the latter involves cursorial and semifossorial carnivorans. At the core of the contrast between these 
+two locomotor types lies a trade-off in limb mechanics, as many adaptations that maximize velocity transmissions are at odds with 
+those that maximize force outputs. Limb bones selected for strength exhibit pronounced crests that increase the area of insertion 
+for locomotor muscles, and limb segments tend to be short given that smaller output levers result in higher force outputs. 
+On the other hand, elongated limb segments result in longer strides and larger output levers that favor runners 
+(because larger output levers increase relative velocity transmissions). Runners also benefit from lighter limbs that 
+maximize the distance gained per force input of each stride i.e. big muscles and conspicuous crests are less advantageous for 
+runners as they are for diggers. The mvSLOUCH package offers analytical tools for evaluating evolutionary hypotheses that both: 
+
+1. relate limb morphologies  to locomotor types (e.g. runners vs diggers); and 
+2. test for trade-offs between force outputs and velocity transmissions in limb mechanics (i.e. strength vs speed).
+
+We will explore these ideas using a subset of the dataset collected by @JSamJMeaSSak2013,
+available at the Dryad Data Repository dx.doi.org/10.5061/dryad.77tm4. We first download the data, remove fossil samples 
+(lacking locomotor ecology data; *Urocyon cinereoargenteus* is removed separately 
+as the current and fossil samples have the same entry as species name in the data file), 
+species with missing measurements (for radius length, see below) and 
+*Lycalopex sp.* (as species identification is required for branch length assignation), 
+rename species according to @WJohetal2006 and @DWilDRee2005, and match the tip 
+labels in the phylogeny (spaces replaced by underscores), and finally keep only the columns that we need 
+(locomotor habits, humerus length, deltopectoral crest length and radius length of the forelimb; see below).
+
+```{r eval=TRUE, echo=TRUE, results="hide", message=FALSE}
+b_correct_dryad_download<-FALSE
+temp <- tempfile()
+tryCatch({
+download.file("datadryad.org/api/v2/datasets/doi%253A10.5061%252Fdryad.77tm4/download",temp)
+b_correct_dryad_download<-TRUE
+},error=function(e){cat("Could not download data file from Dryad! No analysis can be done! Vignette not built!")},
+warning=function(w){cat("Problem with downloading data file from Dryad! No analysis can be done! Vignette not built!")})
+
+if (b_correct_dryad_download){
+    b_correct_dryad_download<-FALSE
+    tryCatch({
+	dfcarnivores_postcranial <- read.table(unz(temp, "Carnivore Postcranial Morphology Data Samuels et al. 2013.txt"),header=TRUE,sep="\t",stringsAsFactors =FALSE)
+	b_correct_dryad_download<-TRUE
+    },error=function(e){cat("Corrupt data file from Dryad! No analysis can be done! Vignette not built!")},
+    warning=function(w){cat("Problem with accessing data file from Dryad! No analysis can be done! Vignette not built!")})
+}
+
+```
+
+```{r conditional_print_part2, child='text_part_2.txt', eval=b_correct_dryad_download}
+```
+
+```{r conditional_print_Dryaderror, eval=!b_correct_dryad_download, echo=FALSE}
+cat("Error: Could not download data file from Dryad! No analysis can be done! Vignette not built!")
+unlink(temp)
+```
+
+
+

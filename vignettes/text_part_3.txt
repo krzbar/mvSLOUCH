@@ -1,0 +1,1159 @@
+<!--
+# Copyright 2020 Jesualdo Fuentes Gonzalez, Jason Pienaar  and Krzysztof Bartoszek
+#
+# This file is part of mvSLOUCH.
+#
+# mvSLOUCH is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# mvSLOUCH comes AS IS in the hope that it will be useful WITHOUT 
+# ANY WARRANTY, NOT even the implied warranty of MERCHANTABILITY 
+# or FITNESS FOR A PARTICULAR PURPOSE. Please understand that there 
+# may still be bugs and errors. Use it at your own risk. We take no 
+# responsibility for any errors or omissions in this package or 
+# for any misfortune that may befall you or others as a result 
+# of its use. See the  GNU General Public License for more details.
+# Please send comments and report bugs to Krzysztof Bartoszek 
+# at krzbar@protonmail.ch .
+#
+# You should have received a copy of the GNU General Public License
+# along with mvSLOUCH.  If not, see <https://www.gnu.org/licenses/>.
+-->
+
+```{r}
+phyltree_mammals$tip.label[which(phyltree_mammals$tip.label=="Uncia_uncia")]<-"Panthera_uncia"
+phyltree_mammals$tip.label[which(phyltree_mammals$tip.label=="Parahyaena_brunnea")]<-"Hyaena_brunnea"
+phyltree_mammals$tip.label[which(phyltree_mammals$tip.label=="Bdeogale_crassicauda")]<-"Bdeogale_jacksoni"
+tips_todrop<-setdiff(phyltree_mammals$tip.label,rownames(dat))
+PrunedTree<-ape::drop.tip(phyltree_mammals,tips_todrop)
+Tree<-ape::di2multi(PrunedTree)
+dat<-dat[Tree$tip.label,]
+```
+
+You will notice that the number of internal nodes (`r Tree$Nnode`) is unexpectedly low given the number of tips 
+(`r length(Tree$tip.label)`).
+This is because the tree includes polytomies. Polytomies are not a problem for mvSLOUCH as its design does not depend
+on the number of descendants. Including polytomies will not affect the values of the likelihood during optimization, and 
+in fact can result in more stable estimations than when using phylogenies with very short branches (close to zero). 
+Another practice that can lead to more stable estimations is using trees scaled to maximum tree height, as the smaller 
+numerical branch length values allow the estimator to find the maximum likelihood peak more easily. As currently loaded, 
+this tree is not scaled: 
+
+```{r}
+mvSLOUCH::phyltree_paths(Tree)$tree_height
+```
+
+This is the total tree height, i.e. the amount of time (in millions of years) from the root to the tips 
+(the function `mvSLOUCH::phyltree_paths()` will be addressed in more detail in [Models section](#section4)). 
+We can scale branch lengths by total tree height to make them a proportion of one:
+
+```{r}
+tree_height<-mvSLOUCH::phyltree_paths(Tree)$tree_height
+ScaledTree<-Tree
+ScaledTree$edge.length<-ScaledTree$edge.length/tree_height
+mvSLOUCH::phyltree_paths(ScaledTree)$tree_height
+```
+
+Now the branches are proportionately scaled to the tree height (rather than absolute time), easing the estimation procedure. 
+It is important to ensure that the taxa names in the data and in the tree match, and that the order of names correspond to each other:
+
+```{r}
+isTRUE(all.equal(ScaledTree$tip.label,rownames(dat)))
+```
+
+When this is not the case (i.e. when there is a list of mismatches instead of the "OK" sign), the data and/or the 
+tree have to be pruned (see the ape package `ape::drop.tip()`, `ape::keep.tip()`, for example)  or renamed accordingly.
+
+# Regime specification {#section3}
+
+We will use the ecological habitat preferences as hypothesized selective regime for the limb traits. mvSLOUCH implements an 
+unordered parsimony algorithm for this purpose of reconstructing the regime states on the phylogeny. 
+First, we need to ensure that the locomotor categories match the correct species names in the tree. 
+This is typically not the case as the data frame and the phylogenetic tree are usually from independent sources and have 
+species names listed in different orders:
+
+```{r}
+row.names(dat)==ScaledTree$tip.label
+```
+
+So, we will store the locomotor categories in a new object where the order is specified according to tree tip names:
+
+```{r}
+regimes<-dat$Ecology[order(match(row.names(dat), ScaledTree$tip.label))]
+```
+
+With this new object we can run the parsimony reconstruction:
+
+```{r}
+regimesFitch<-mvSLOUCH::fitch.mvsl(ScaledTree,regimes)
+```
+
+When the reconstruction involves ambiguous nodes (as in this case), mvSLOUCH offers two options for resolving the 
+character optimization: ACCTRAN (accelerated transformations) and DELTRAN (delayed transformations). 
+The former assigns changes as close to the root of the phylogenetic tree as possible (thus favoring reversals), and the 
+latter as close to the tips as possible (thus favoring convergences). Here we will use DELTRAN for the purposes of illustration:
+
+```{r}
+regimesFitch<-mvSLOUCH::fitch.mvsl(ScaledTree,regimes,deltran=TRUE)
+```
+
+mvSLOUCH also offers the possibility of fixing the root to a given character state, which is particularly useful if 
+the root node is ambiguous. We can visualize the reconstruction by 
+painting the branches of the phylogenetic tree with different colors:
+
+1. generalist as purple, 
+2. cursorial as red, 
+3. arboreal as green, 
+4. scansorial as orange,
+5. semiaquatic as blue and 
+6. semifossorial as brown
+
+according to the reconstruction: 
+
+```{r}
+reg.col<-regimesFitch$branch_regimes
+reg.col[reg.col=="generalist"]<-"purple"
+reg.col[reg.col=="arboreal"]<-"green"
+reg.col[reg.col=="cursorial"]<-"red"
+reg.col[reg.col=="scansorial"]<-"orange"
+reg.col[reg.col=="semiaquatic"]<-"blue"
+reg.col[reg.col=="semifossorial"]<-"brown"
+```
+
+```{r eval=FALSE, echo=TRUE}
+plot(ScaledTree, cex = 1,  edge.color = reg.col, edge.width=3.5, type="fan", font=4)
+```
+
+```{r eval=TRUE, echo=FALSE, out.width = "100%", fig.pos="h"}
+knitr::include_graphics("./ScaledTree_fan.png", auto_pdf=TRUE)
+```
+
+# Main models {#section4}
+
+Before running analyses, we will log transform the morphological variables so that they are less susceptible to scaling effects:
+
+```{r}
+mvData<-data.matrix(dat[,c("HuPCL","RaL","HuL")])
+mvData<-log(mvData)
+```
+
+mvSLOUCH works faster when the phylogeny object includes information on the paths and distances for each node. 
+This information can be obtained with the function `mvSLOUCH::phyltree_paths()`:
+
+```{r}
+mvStree<-mvSLOUCH::phyltree_paths(ScaledTree)
+```
+
+## Brownian motion (BM)
+
+Now we are ready to explore some models. Let us start with a multivariate Brownian motion model, 
+under which the morphological variables accumulate variation over time in the absence of systematic selection towards 
+deterministic optima. The main inputs are the modified data and tree that we just created:
+
+```{r}
+BMestim<-mvSLOUCH::BrownianMotionModel(mvStree,mvData)
+```
+
+Key parameter estimates for this model are the diffusion component of the stochastic 
+differential equation (important for obtaining the infinitesimal covariance matrix) and the ancestral trait values:
+
+```{r}
+BMestim$ParamsInModel$Sxx
+BMestim$ParamsInModel$vX0
+```
+
+## Ornstein-Uhlenbeck Brownian-motion (OUBM) {#section4_2}
+
+We can also specify a model with a multivariate regression setup in which humerus length is used as a continuous 
+random explanatory variable using the argument `predictors` in the `mvSLOUCH::mvslouchModel()` function. Here the predictor 
+variable is modeled as a Brownian motion process on the phylogeny and the response variables are modeled as a 
+multivariate Ornstein-Uhlenbeck process. A given response trait's optimum is affected both by the other response variable trait's 
+optimum as well as the state of the predictor variable. Humerus length is the $3^{\mathrm{rd}}$ 
+variable in the data matrix, where the first two are the response variables (indicated with the argument `kY`), 
+and the model is set up as follows:
+
+```{r eval=FALSE, echo=TRUE}
+OU1BM<-mvSLOUCH::mvslouchModel(mvStree, mvData, kY = 2, predictors = c(3))
+```
+
+The output for this model has more components than the simpler BM only model as there are many more parameters estimated. 
+We will cover several of them later on [(Numerical optimization section)](#section6), but describe some key ones here 
+starting with the rate of adaptation matrix $(\mathbf{A})$:
+
+```{r}
+OU1BM$FinalFound$ParamsInModel$A 
+```
+
+This matrix contains information about phylogenetic inertia, which is easier to interpret with the half-lives:
+
+```{r}
+OU1BM$FinalFound$ParamSummary$phyl.halflife$halflives
+```
+
+#Under this model, it takes close to five times the tree height for the response variables to lose half of their ancestral influence.
+#So, if we assume that humerus length evolves randomly, it takes a very long time for the response variables to track it. 
+#This can be confirmed by another set of key parameters in this model, the optimal and evolutionary regressions:
+Under this model, it takes close to five times the tree height for the response variables to lose half of their ancestral influence. 
+Note that, unlike the $\mathbf{A}$ matrix, the half-life entries are numbered (`[,1]` and `[,2]`) rather than tied to specific 
+variables (`HuPCL` and `RaL`). This is because half-lives are reported in the eigenvector directions rather than in 
+trait space. So, if we assume that humerus length evolves randomly, it takes a very long time for the response variables to track it. 
+This can be confirmed by another set of key parameters in this model, the optimal and evolutionary regressions:
+
+```{r}
+OU1BM$FinalFound$ParamSummary$optimal.regression
+OU1BM$FinalFound$ParamSummary$evolutionary.regression
+```
+
+The optimal regression describes the predicted association if the responses (`HuPCL` and `RaL`) could adapt instantaneously to 
+changes in the explanatory variable free of ancestral trait influences (`HuL`). The evolutionary regression shows the 
+observed relationship, after accounting for general phylogenetic effects. The two sets of coefficients are very different, 
+indicating that the observed association is far shallower than the theoretical expectation of instantaneous adaptation. 
+Consistent with the half-lives, this suggests that changes in the response variables towards a randomly evolving 
+humerus length are very slow. However, note that this model also assumes that the carnivorans under consideration evolve in 
+the same type of environment. This can be easily recognized by checking the deterministic part of the primary optimum
+of the response variables:
+
+```{r}
+OU1BM$FinalFound$ParamsInModel$mPsi
+```
+
+There is a single regime for the primary optimum, but if the habitats these carnivorans occupy have had any impact on the 
+evolution of their limbs, several niches should be considered (one for each habitat type, analogous to MANCOVA). 
+We can account for this habitat contribution by using the locomotor preferences as a selective regime (with the argument 
+`regimes` below; note that we are calling the `regimesFitch` object created earlier in the [Regime specification section](#section3)). 
+Note also that we are specifying the niche at the root of the tree as "generalist" (with the argument `root.regime` below) 
+as indicated by the parsimony reconstruction (the base of the tree is purple in the figure in the [Regime specification section](#section3), 
+corresponding to the generalist niche): 
+
+```{r eval=FALSE, echo=TRUE}
+OUBMestim <- mvSLOUCH::mvslouchModel(mvStree, mvData, kY = 2, predictors = c(3), regimes = regimesFitch$branch_regimes, root.regime = "generalist")
+```
+
+Before going further, note there is a big difference in the output of this model compared with the Brownian motion one concerning the 
+likelihood calculations. Under the OUBM model, two sets of outputs are reported:
+
+```{r eval=FALSE, echo=TRUE}
+OUBMestim$FinalFound
+OUBMestim$MaxLikFound
+```
+
+The former (`OUBMestim$FinalFound`) stores the estimates corresponding the point where the likelihood optimization stopped. 
+The latter (`OUBMestim$MaxLikFound`) stores the estimates under the maximum likelihood point found during the optimization.
+When these points are the same (as in `OU1BM`), mvSLOUCH will report it explicitly (`"Same as final found"`). 
+When they are not, the outputs for each point will be stored separately. 
+The discrepancy between the two points is indicative of likelihood convergence issues. We will discuss the issue of 
+convergence in the [Model comparison section](#section5).
+However, this does not  seem to be the case for the current model (`OUBMestim`) and 
+we may start comparing this model (`OUBMestim`) with the single regime specification (`OU1BM`): 
+
+```{r}
+OUBMestim$FinalFound$ParamsInModel$mPsi
+```
+
+The model estimated a very different deterministic part of the primary optimum for each variable under particular locomotor types. 
+This habitat contribution will also affect all other parameter estimates. The half-lives are now:
+
+```{r}
+OUBMestim$FinalFound$ParamSummary$phyl.halflife$halflives
+```
+
+When accounting for the locomotor types, the response variables lose their ancestral effects faster. 
+The lower phylogenetic inertia is also observed in terms of the optimal regression relationship with the explanatory variable:
+
+```{r}
+OUBMestim$FinalFound$ParamSummary$optimal.regression
+OUBMestim$FinalFound$ParamSummary$evolutionary.regression
+```
+
+The difference between the two regressions is less extreme here than in the single regime specification (`OU1BM`), in particular regarding
+radius length.
+So, the response variables (especially radius length) are less influenced (having smaller, in magnitude, regression coefficients)
+by evolving humerus length when locomotor types are accounted for. But what if humerus length does not evolve independently of the other two variables? 
+Then using a BM process to model the evolution of humerus length would not be appropriate (as in `OU1BM` and `OUBMestim`), 
+requiring a different model that we describe next.
+
+## Ornstein-Uhlenbeck Ornstein-Uhlenbeck (OUOU) {#section4_3}
+
+Instead of assuming that humerus length evolves as BM, we can model all variables as an OU process:
+
+```{r eval=FALSE, echo=TRUE}
+OU1OU <- mvSLOUCH::ouchModel(mvStree, mvData, predictors = c(3))
+```
+
+We can easily verify that humerus length is now following an OU process by checking the rate of adaptation matrix 
+(note that, unlike the OUBM models, `HuL` is now part of the matrix):
+
+```{r}
+OU1OU$FinalFound$ParamsInModel$A
+```
+
+We can now look at the half-life estimates for the vector of traits:
+
+```{r}
+OU1OU$FinalFound$ParamSummary$phyl.halflife$halflives
+```
+
+Note that two half-lives (second and third) are negative (as opposed to the OUBM model explored 
+previously), associated with the negative eigenvalues from the $\mathbf{A}$ matrix. 
+The interpretation of these negative eigenvalues is tricky, although 
+one way of looking at them is in terms of character displacement [@KBarJPiePMosSAndTHan2012]. Before trying any sort of interpretation, 
+however, let us take a look at the conditional on predictors non-phylogenetic $\mathrm{R}^{2}$ that is computed by mvSLOUCH: 
+
+```{r}
+OU1OU$FinalFound$ParamSummary$RSS$R2_non_phylogenetic_conditional_on_predictors
+```
+
+It seems much better, compared to the OUBM models explored above:
+
+```{r}
+OU1BM$FinalFound$ParamSummary$RSS$R2_non_phylogenetic_conditional_on_predictors
+OUBMestim$FinalFound$ParamSummary$RSS$R2_non_phylogenetic_conditional_on_predictors
+```
+
+In the `OUBMestin` object we have a `NaN` value as there are huge numerical issues in the calculation. 
+This is due to the optimizer ending in a local maximum with the $\mathbf{A}$ matrix
+
+```{r}
+OUBMestim$FinalFound$ParamsInModel$A
+```
+
+having entry `[2,2]` orders of magnitude larger than the other entries and resulting in one extremely short half-life
+(essentially instantaneous adaptation) and one extremely long half-life
+
+```{r}
+OUBMestim$FinalFound$ParamSummary$phyl.halflife$halflives
+```
+
+Such situations cause numerical issues when summarizing parameters, calculating summary statistics or conditional distributions.
+In fact, the value of the `R2_non_phylogenetic_conditional_on_predictors` could actually be negative. 
+This could be due to the fact that the non-phylogenetic conditional $\mathrm{R}^{2}$ is calculated under a completely different, 
+non-nested, model (compared to the model in which the parameters are estimated).
+As the name of the field
+suggests, this statistic ignores the phylogenetic correlations. Hence, since the parameters were estimated
+with the phylogenetic correlations, it could happen that a model with fewer degrees of freedom (only the grand
+mean) had a lower residual sum of squares (but it is non-nested as it ignores the phylogenetic correlations). 
+The reason why we calculate the conditional $\mathrm{R}^{2}$ without the phylogeny is that the linear
+likelihood evaluation algorithm cannot be carried over to conditional distributions. However,
+the hope is that if the model fit is good, then the non-phylogenetic conditional $R^{2}$ will
+be high, and tell us something about the explained variance. 
+We will not  interpret this model right now, 
+as other models could explain the data better [(Model comparison section)](#section5). So, let us 
+rather focus on comparing 
+some of its outputs with the OUBM counterpart instead. Recall that under the OUBM model, the association of the responses 
+with the explanatory variable was established by contrasting two regressions (i.e. the optimal and evolutionary regressions). 
+Recall also that the optimal regression described a theoretical association in which the responses adapted instantaneously to a 
+randomly evolving humerus length. But humerus length does not evolve randomly under the OUOU model, so this theoretical contrast 
+is no longer in place and mvSLOUCH reports only the observed relationship:
+
+```{r}
+OU1OU$FinalFound$ParamSummary$evolutionary.regression
+```
+
+In fact, the primary optimum value can now be estimated for humerus length, given that it does not evolve under BM under this model:
+
+```{r}
+OU1OU$FinalFound$ParamsInModel$mPsi
+```
+
+There is a single primary optimum value for each morphological variable, reflecting the constant regime we specified in the OUOU model. 
+Let us now a fit an OUOU model accounting for the locomotor preferences as selective regime:
+
+```{r eval=FALSE, echo=TRUE}
+OUOUestim <- mvSLOUCH::ouchModel(mvStree, mvData, regimes = regimesFitch$branch_regimes, root.regime = "generalist", predictors = c(3))
+```
+
+Now we have several regimes, one for each locomotor category:
+
+```{r}
+OUOUestim$FinalFound$ParamsInModel$mPsi
+```
+
+Before trying to interpret the primary optima on different locomotor types, let us take a look at the eigenvalues 
+from the $\mathbf{A}$ matrix:
+
+```{r}
+OUOUestim$FinalFound$ParamSummary$phyl.halflife$halflives
+```
+
+and at the the output of the non-phylogenetic $\mathrm{R}^{2}$: 
+
+```{r}
+OUOUestim$FinalFound$ParamSummary$RSS$R2_non_phylogenetic_conditional_on_predictors
+```
+
+The evolutionary regression has positive coefficients:
+
+```{r}
+OUOUestim$FinalFound$ParamSummary$evolutionary.regression
+```
+
+We have up to now merely scratched the surface of the main 
+models implemented by mvSLOUCH. Before saying anything about their performance, we need to conduct a more thorough model 
+comparison, which is the topic of the next section.
+
+# Model comparison {#section5}
+
+In the previous section we explored a basic set of models applied on the carnivoran dataset. 
+These models differ not only in their assumptions but also in their level of complexity, as revealed by their degrees of freedom:
+
+```{r}
+cbind(BMestim$ParamSummary$dof,
+      OU1BM$FinalFound$ParamSummary$dof,
+      OU1OU$FinalFound$ParamSummary$dof,
+      OUBMestim$FinalFound$ParamSummary$dof,
+      OUOUestim$FinalFound$ParamSummary$dof)
+```
+
+BM (1) is the simplest candidate, and the OU models accounting for the selective regime (4, 5) are the most complex. 
+However, the OU models themselves can vary considerably in complexity depending on their parameter specifications. 
+mvSLOUCH offers a variety of parameter specifications that allows adjusting the level of complexity of the models as well 
+as contrasting different evolutionary scenarios on the data. The main two arguments involved in this parameter modification are 
+`Atype` and `Syytype` (see below for an example), which allow setting the type of $\mathbf{A}$ and $\mathbf{\Sigma}_{yy}$ matrices, 
+respectively. mvSLOUCH sets up $\mathbf{\Sigma}_{yy}$ as `"UpperTri"` by default (i.e. upper triangular), which can be easily 
+verified by checking this matrix in any of the OUOU models fitted above (this one in particular corresponds to the 
+OUOU model with the locomotor regime):
+
+```{r}
+OUOUestim$FinalFound$ParamsInModel$Syy
+```
+
+Other options are: `"SingleValueDiagonal"`, `"Diagonal"`, `"LowerTri"`, `"Symmetric"`, and `"Any"`. In the case of the 
+$\mathbf{A}$ matrix, mvSLOUCH sets it up as `"Invertible"` by default, with other options being: 
+`"SingleValueDiagonal"`, `"Diagonal"`, `"UpperTri"`, `"LowerTri"`, `"Symmetric"`, `"SymmetricPositiveDefinite"`, 
+`"DecomposablePositive"`, `"DecomposableNegative"`, `"DecomposableReal"`, `"TwoByTwo"`, and `"Any"`. 
+The default setting (i.e. `“Invertible”`) is very general and makes the fewest biological assumptions on the traits, 
+but can often lead the estimation procedure to getting stuck at a local likelihood peak. 
+Let us try a model with the matrices $\mathbf{\Sigma}_{yy}$ as lower triangular, and $\mathbf{A}$ as diagonal: 
+
+```{r eval=FALSE, echo=TRUE}
+OUBMestim.mod <- mvSLOUCH::mvslouchModel(mvStree, mvData, kY = 2, predictors = c(3), regimes = regimesFitch$branch_regimes, root.regime = "generalist", Syytype = "LowerTri", Atype = "Diagonal")
+```
+
+The maximum likelihood and final points are the same:
+
+```{r}
+OUBMestim.mod$MaxLikFound
+```
+
+It is important to keep in mind, however, that no parameter specification guarantees 
+attaining the maximum likelihood peak. Additional measures should be taken towards this end, such as increasing 
+the number of iterations (which can be specified with the argument `maxiter`, see the manual for details) or 
+conducting the search from different starting points (e.g. running the analysis several times, as a new starting 
+point will be used for each run). It starts to become obvious that a thorough model comparison is challenging, not only 
+because several parameter combinations are possible, but also because each of these combinations should be ran from 
+different starting points. mvSLOUCH facilitates this process by offering a wrapper function that runs different types of 
+models on the data from different starting points, which we will explore next.
+
+## Global regime {#section5_1}
+
+Let us apply the wrapper function to the constant regime for the whole tree:
+
+```{r eval=FALSE, echo=TRUE}
+OU1 <- mvSLOUCH::estimate.evolutionary.model(mvStree, mvData, repeats = 5, model.setups = "basic", predictors = c(3), kY = 2, doPrint = TRUE)
+```
+
+This command takes some time to run, as many models are fitted consequently. By setting the `doPrint` argument to `TRUE`, 
+we can visualize what type of model is being fitted at each moment (this visualization can be omitted by leaving the default 
+option: `FALSE`). The different OU model settings are specified through the argument `model.setups`. The `"basic"` option, despite 
+being the simplest, is sufficient for most purposes and was selected for the current example. 
+Other options increase progressively the model combinations to be tried in the following order: `"fundamental"`, `"extended"`, 
+and finally `"all"` (the latter taking considerable time to run, as all possible model combinations are tried). 
+The option `"basic"` consists of all possible combinations of `"Diagonal"` and `"UpperTri"` settings for `Syytype`, with 
+`"Diagonal"`, `"UpperTri"`, `"LowerTri"`, `"DecomposablePositive"`, and `"DecomposableReal"` settings for `Atype`. 
+Each of these settings ($10$ combinations) is tried for OUBM and OUOU models ($20$ combinations in total), and each 
+combination is run from the number of starting points specified in `repeats`. Since we specified $5$ starting points in this case, 
+we will have $100$ OU models (the $20$ combinations described earlier running from $5$ different starting points), plus BM 
+(for a total of $101$ models). Thus, the output is large and it might be a good idea to store it in a file:
+
+```{r}
+capture.output(OU1,file = "OU1.txt")
+```
+
+The best candidate from the $101$ possibilities is an OUOU model (ouch) with diagonal $\mathbf{A}$ and upper triangular 
+$\mathbf{\Sigma}_{yy}$:
+
+```{r}
+OU1$BestModel$model
+```
+
+Under the `"basic"` setting of `model.setups`, the diagonal elements of $\mathbf{A}$ (`diagA`) are always positive 
+(`"Positive"`) and the signs of other parameters (`parameter_signs`) are not coerced in any particular way (and thus the list is empty). 
+The argument `model.setups` also allows modifying these signs by providing customized lists (see manual for details), 
+but this should be done with caution as some model specifications rely on particular sign settings. Therefore, the 
+user should make sure that customized sign settings do not conflict other model specifications (e.g. `Atype` and `Syytype` settings). 
+The model setting of this preferred candidate behaves better than the OUOU model under a global regime we fitted earlier 
+[(`OU1OU`; see section OUOU)](#section4_3). The eigenvalues from the $\mathbf{A}$ matrix are all positive for the current model:
+
+```{r}
+OU1$BestModel$BestModel$ParamSummary$phyl.halflife$halflives
+```
+
+As well as the non-phylogenetic conditional on predictors $\mathrm{R}^{2}$
+
+```{r}
+OU1$BestModel$key.properties$R2_non_phylogenetic_conditional_on_predictors
+```
+
+The value of $\mathrm{R}^{2}$ is similar to that of the earlier model (`OU1OU`) but the wrapper function has shown us that a 
+different parameterization results in
+a simpler structure with a diagonal $\mathbf{A}$
+
+```{r}
+OU1$BestModel$BestModel$ParamsInModel$A
+```
+
+unlike the `OU1OU` case. However, from our simulations studies there seems to be some bias towards models with
+diagonal $\mathbf{A}$ so a careful consideration of competing models has to be done. 
+A comprehensive output for this improved model can be found in the  `BestModel` field of the output list:
+
+```{r eval=FALSE, echo=TRUE}
+OU1$BestModel
+```
+
+The list also includes the outputs of all the compared models. These models can be found in the `testedModels` 
+element of the list. For example, the best candidate corresponds to model $11$ of the compared models:
+
+```{r}
+OU1$BestModel$i
+```
+
+So, you can also visualize the outputs of the preferred candidate in the list of tested models:
+
+```{r eval=FALSE, echo=TRUE}
+OU1$testedModels[[11]]
+```
+
+BM corresponds to model 21:
+
+```{r}
+OU1$testedModels[[21]]
+```
+
+The settings of all the models tried can be found in the `model.setups` element of the output list 
+(where: "bm" = BM; "mvslouch" = OUBM; "ouch" = OUOU):
+
+```{r eval=FALSE, echo=TRUE}
+OU1$model.setups
+```
+
+Now, how did mvSLOUCH select among all these $101$ candidates? It used information criteria, in particular, the 
+second-order bias correction of the Akaike information criterion (AICc):
+
+```{r}
+OU1$BestModel$BestModel$ParamSummary$aic.c
+```
+
+With lower values representing better model fit. Although AICc (`aic.c`) is used for identifying the top candidate 
+(`OU1$BestModel`), other criteria are reported as well in case the user is interested in conducting alternative comparisons
+(aic = Akaike information criterion; sic = Schwarz information criterion; bic = Bayesian information criterion):
+
+```{r}
+OU1$BestModel$BestModel$ParamSummary$aic
+OU1$BestModel$BestModel$ParamSummary$sic
+OU1$BestModel$BestModel$ParamSummary$bic
+```
+
+## Full regime {#section5_2}
+
+The previous comparison was conducted among a set of models that did not account for locomotor preferences. 
+We can do so by running a new comparison, this time accounting for the selective regime (and then comparing the results 
+with the above outputs under the global regime):
+
+```{r eval=FALSE, echo=TRUE}
+OUf <- mvSLOUCH::estimate.evolutionary.model(mvStree, mvData, regimes = regimesFitch$branch_regimes, root.regime = "generalist", repeats = 5, model.setups = "basic", predictors = c(3), kY = 2, doPrint = TRUE)
+```
+
+Note that, other than adding information on the selective regimes (through the arguments `regimes` and `root.regime`), the 
+specifications are the same as for the previous comparison (`OU1`). Once again, storing the results in file might be a 
+good way of readily accessing the outputs later on: 
+
+```{r}
+capture.output(OUf, file = "OUf.txt")
+```
+
+Note that the preferred candidate under the new comparison corresponds to the same model setting of the uniform regime case:
+
+```{r}
+OUf$BestModel$model
+```
+
+We now look at the the eigenvalues from the $\mathbf{A}$ matrix and the 
+non-phylogenetic conditional on predictors $\mathrm{R}^{2}$:
+
+```{r}
+OUf$BestModel$BestModel$ParamSummary$phyl.halflife$halflives
+OUf$BestModel$key.properties$R2_non_phylogenetic_conditional_on_predictors
+```
+
+The difference between the two models is clearly reinforced by AICc, with the new candidate showing a remarkably lower value than 
+the old one:
+
+```{r}
+OUOUestim$FinalFound$ParamSummary$aic.c
+OUf$BestModel$BestModel$ParamSummary$aic.c
+```
+
+This newer model does also better than the top candidate of the wrapper function under a global regime 
+(AICc = `r OU1$BestModel$aic.c`), although the difference of values in these two comparisons is considerable: 
+
+```{r}
+OUOUestim$FinalFound$ParamSummary$aic.c-OUf$BestModel$BestModel$ParamSummary$aic.c
+OU1$BestModel$BestModel$ParamSummary$aic.c-OUf$BestModel$BestModel$ParamSummary$aic.c
+```
+
+@KBurDAnd2002 provided some rules of thumb (but see also @KBurDAndKHuy2011) 
+for ranking support for candidate models based on such differences ($\Delta$AICc):
+
+1. Support $0 - 2$: Substantial similarity
+2. $4 - 7$: Considerably less similarity
+3. $>10$: Essentially no similarity
+
+Based on these rules of thumb, there is little empirical support for the top model of the global regime comparison 
+($\Delta$AICc = `r OU1$BestModel$BestModel$ParamSummary$aic.c-OUf$BestModel$BestModel$ParamSummary$aic.c`), 
+and essentially no support for the OUOU accounting for locomotor types under default settings 
+($\Delta$AICc = `r OUOUestim$FinalFound$ParamSummary$aic.c-OUf$BestModel$BestModel$ParamSummary$aic.c`),
+when compared with the preferred candidate of the new comparison (`OUf$BestModel`). 
+These results, besides highlighting the advantages of a thorough model comparison 
+(facilitated by the wrapper function of mvSLOUCH), suggest that locomotor preferences work effectively as a 
+selective regime for the limb attributes considered in this example.
+
+## Lumped regimes {#section5_3}
+
+The preferred model presented above uses the regime specification inspired by the categorization of 
+@JSamJMeaSSak2013, with six locomotor ecologies. As introduced earlier 
+[(in the Data section)](#section2), however, some morphological attributes are advantageous for different locomotor 
+types, so it is possible that sets of niches have experienced similar selective pressures. 
+For example, we mentioned how both scansorial and arboreal forms climb, and how both swimmers and diggers benefit 
+from high force outputs of the limbs. If these locomotor types have experienced similar selective pressures, the 
+model specified above (with six different niches) is probably too complex. This is not a trivial issue, 
+as these multivariate models are inherently complex and every effort to simplify them is worth a try 
+(this is one of the advantages of conducting the model comparison under the wrapper function). 
+This can be achieved by lumping some of the niches together, and comparing the results with the outputs of the full 
+regime specification. Besides avoiding overparameterization, the simplified regimes can offer better insights on the 
+adaptive significance of the traits. For example, if a model lumping the semiaquatic and semifossorial niches has better 
+fit than the full regime specification, it would be indicative that the selective pressure is more associated with the type of 
+motion (stroking) than the habitat per se (i.e. water or soil). For this demonstration, we will 
+compare the full regime specification with three simpler alternatives: 
+
+1. lumping the arboreal and scansorial niches (climbers), 
+2. lumping the semiaquatic and semifossorial niches (strokers), and 
+3. combining the two (climbers and strokers). 
+
+Let us start by lumping the arboreal and scansorial niches:
+
+```{r}
+climb.reg <- regimesFitch$branch_regimes
+climb.reg[climb.reg=="arboreal"] <- "climber"
+climb.reg[climb.reg=="scansorial"] <- "climber"
+```
+
+Now we have five niches: generalist, cursorial, climber, semiaquatic, semifossorial.  
+
+```{r}
+climb.col <- climb.reg
+climb.col[climb.col=="generalist"] <- "purple"
+climb.col[climb.col=="climber"] <- "green"
+climb.col[climb.col=="cursorial"] <- "red"
+climb.col[climb.col=="semiaquatic"] <- "blue"
+climb.col[climb.col=="semifossorial"] <- "brown"
+```
+```{r eval=FALSE, echo=TRUE}
+plot(ScaledTree, cex = 1,  edge.color = climb.col, edge.width=3.5, type="fan", font=4)
+```
+
+```{r eval=TRUE, echo=FALSE, out.width = "100%", fig.pos="h"}
+knitr::include_graphics("./ScaledTree2_fan.png", auto_pdf=TRUE)
+```
+
+Let us conduct a model comparison under this regime specification:
+
+```{r eval=FALSE, echo=TRUE}
+OUc <- mvSLOUCH::estimate.evolutionary.model(mvStree, mvData, regimes = climb.reg, root.regime = "generalist", repeats = 5, model.setups = "basic", predictors = c(3), kY = 2, doPrint = TRUE)
+```
+
+The top candidate has the same parameter structure as the preferred models described above (`OU1` and `OUf`):  
+
+```{r}
+OUc$BestModel$model
+```
+
+This consolidates the properties of this parameterization for describing the data. The best model of this comparison 
+does better than the global regime (AICc = `r OU1$BestModel$aic.c`),
+but not as well as the full regime specification (AICc = `r OUf$BestModel$BestModel$ParamSummary$aic.c`):
+
+
+```{r}
+OUc$BestModel$BestModel$ParamSummary$aic.c
+```
+
+So, at least for now, the extra complexity of the full regime specification is justified. Let us see if the same 
+applies when lumping the semiaquatic and semifossorial niches:
+
+```{r}
+strok.reg<-regimesFitch$branch_regimes
+strok.reg[strok.reg=="semiaquatic"]<-"stroker"
+strok.reg[strok.reg=="semifossorial"]<-"stroker"
+```
+
+Once again, we have five niches: generalist, cursorial, arboreal, scansorial, stroker.
+
+```{r}
+strok.col<-strok.reg
+strok.col[strok.col=="generalist"]<-"purple"
+strok.col[strok.col=="stroker"]<-"blue"
+strok.col[strok.col=="cursorial"]<-"red"
+strok.col[strok.col=="arboreal"]<-"green"
+strok.col[strok.col=="scansorial"]<-"orange"
+```
+```{r eval=FALSE, echo=TRUE}
+plot(ScaledTree, cex = 1,  edge.color = strok.col, edge.width=3.5, type="fan", font=4)
+```
+
+```{r eval=TRUE, echo=FALSE, out.width = "100%", fig.pos="h"}
+knitr::include_graphics("./ScaledTree3_fan.png", auto_pdf=TRUE)
+```
+
+The model comparison under this new lumped regime specification: 
+
+```{r eval=FALSE, echo=TRUE}
+OUs <- mvSLOUCH::estimate.evolutionary.model(mvStree, mvData, regimes = strok.reg, root.regime = "generalist", repeats = 5, model.setups = "basic", predictors = c(3), kY = 2, doPrint = TRUE)
+```
+
+The preferred candidate of this comparison confirms that the model type found in previous analyses has good properties for 
+describing the data:
+
+```{r}
+OUs$BestModel$model
+```
+
+This model does better than the alternative lumped strategy (AICc = 
+`r OUc$BestModel$BestModel$ParamSummary$aic.c`), but only extremely marginally better than the 
+full regime specification (AICc = `r OUf$BestModel$BestModel$ParamSummary$aic.c`): 
+
+```{r}
+OUs$BestModel$BestModel$ParamSummary$aic.c
+```
+
+These two regime specifications (`OUf` and `OUs`) are supported then, although the lumped strategy provides, 
+besides a slightly better fit, a simpler model:
+
+```{r}
+OUf$BestModel$BestModel$ParamSummary$dof
+OUs$BestModel$BestModel$ParamSummary$dof
+```
+
+Before saying anything decisive on this issue, however, let us fit an even simpler model by using a reduced regime 
+specification combining the two lumping strategies described above: 
+
+```{r}
+red.reg<-regimesFitch$branch_regimes
+red.reg[red.reg=="arboreal"]<-"climber"
+red.reg[red.reg=="scansorial"]<-"climber"
+red.reg[red.reg=="semiaquatic"]<-"stroker"
+red.reg[red.reg=="semifossorial"]<-"stroker"
+```
+
+In this reduced regime we have four niches: generalist, cursorial, climber, stroker.
+
+```{r}
+red.col<-red.reg
+red.col[red.col=="generalist"]<-"purple"
+red.col[red.col=="climber"]<-"green"
+red.col[red.col=="cursorial"]<-"red"
+red.col[red.col=="stroker"]<-"blue"
+```
+```{r eval=FALSE, echo=TRUE}
+plot(ScaledTree, cex = 1,  edge.color = red.col, edge.width=3.5, type="fan", font=4)
+```
+
+```{r eval=TRUE, echo=FALSE, out.width = "100%", fig.pos="h"}
+knitr::include_graphics("./ScaledTree4_fan.png", auto_pdf=TRUE)
+```
+
+Model comparison for this reduced regime specification:
+
+```{r eval=FALSE, echo=TRUE}
+OUr <- mvSLOUCH::estimate.evolutionary.model(mvStree, mvData, regimes = red.reg, root.regime = "generalist", repeats = 5, model.setups = "basic", predictors = c(3), kY = 2, doPrint = TRUE)
+```
+
+The data under the reduced regime is also well explained by the model type selected under other specifications:
+
+```{r}
+OUr$BestModel$model
+```
+
+But it is not as well supported as the previous model 
+(AICc = `r OUc$BestModel$BestModel$ParamSummary$aic.c`)
+or as the full regime specification 
+(AICc = `r OUf$BestModel$BestModel$ParamSummary$aic.c`):
+
+```{r}
+OUr$BestModel$BestModel$ParamSummary$aic.c
+```
+
+So, the specifications that are better supported as adaptive regimes are 
+
+1. the one with strokers as a lumped niche (OUs), and 
+2. the one without lumped niches (OUf).
+
+
+# Numerical optimization  {#section6}
+
+Given that the more complex model (`OUf`) is not helping us to explain the data better than the simpler model (`OUs`), we 
+could narrow our attention on the latter. But as mentioned earlier [(Model comparison section)](#section5), there is no guarantee 
+that the maximum likelihood peak has been reached, not even after using the wrapper function. It is possible that one of the 
+two models (or both) are stuck at a local likelihood peak. A way to confirm this is using the previous outputs to conduct a more 
+focused search in which the starting points are based on the optimized estimates of progressively complex models. 
+We can start this search from a simple model (without regimes) that can then be used as starting point for both regime specifications:
+
+```{r eval=FALSE, echo=TRUE}
+OUOUstart<-mvSLOUCH::ouchModel(mvStree, mvData, predictors = c(3), Atype = "Diagonal", diagA = NULL)
+```
+
+We are using the ouchModel function because both preferred regime specifications (`OUf` and `OUs`) are based on an OUOU 
+model of evolution. We are using the defaults for `Syytype` and a simple specification for `Atype`, allowing the signs of the 
+$\mathbf{A}$ matrix to vary (`diagA = NULL`). We will use the resulting $\mathbf{A}$ and $\mathbf{\Sigma}_{yy}$ matrices from this model:
+
+```{r}
+OUOUstart$FinalFound$ParamsInModel$A
+OUOUstart$FinalFound$ParamsInModel$Syy
+```
+
+As starting points for models specifying the selective regimes under the specifications identified by the wrapper function:
+
+```{r eval=FALSE, echo=TRUE}
+OptOUs1<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = strok.reg, root.regime = "generalist", predictors = c(3), Atype = OUs$BestModel$model$Atype, Syytype = OUs$BestModel$model$Syytype, diagA = OUs$BestModel$model$diagA, start_point_for_optim=list(A = OUOUstart$FinalFound$ParamsInModel$A, Syy = OUOUstart$FinalFound$ParamsInModel$Syy))
+```
+
+```{r eval=FALSE, echo=TRUE}
+OptOUf1<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = regimesFitch$branch_regimes, root.regime = "generalist", predictors = c(3), Atype = OUf$BestModel$model$Atype, Syytype = OUf$BestModel$model$Syytype, diagA = OUf$BestModel$model$diagA, start_point_for_optim=list(A = OUOUstart$FinalFound$ParamsInModel$A, Syy = OUOUstart$FinalFound$ParamsInModel$Syy))
+```
+
+We accomplish this by using the argument `start_point_for_optim`. Note that both the reduced (`regimes = strok.reg`) and 
+full (`regimes = regimesFitch$branch_regimes`) regime specifications retrieve `Atype`, `Syytype`, and `diagA` objects from the 
+outputs of the wrapper function (`OUs` and `OUf`, respectively). Let us explore the likelihood for both models:
+
+```{r}
+OptOUs1$FinalFound$LogLik
+OptOUf1$FinalFound$LogLik
+```
+
+These models give us new $\mathbf{A}$ and $\mathbf{\Sigma}_{yy}$ matrices that we will use in turn as starting points for new 
+analyses under each regime:
+
+```{r eval=FALSE, echo=TRUE}
+OptOUs2<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = strok.reg, root.regime = "generalist", predictors = c(3), Atype = OUs$BestModel$model$Atype, Syytype = OUs$BestModel$model$Syytype, diagA = OUs$BestModel$model$diagA, start_point_for_optim=list(A = OptOUs1$FinalFound$ParamsInModel$A, Syy = OptOUs1$FinalFound$ParamsInModel$Syy))
+OptOUf2<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = regimesFitch$branch_regimes, root.regime = "generalist", predictors = c(3), Atype = OUf$BestModel$model$Atype, Syytype = OUf$BestModel$model$Syytype, diagA = OUf$BestModel$model$diagA, start_point_for_optim=list(A = OptOUf1$FinalFound$ParamsInModel$A, Syy = OptOUf1$FinalFound$ParamsInModel$Syy))
+```
+
+Note that this time we did not use `OUOUstart` (the simple model) to retrieve the $\mathbf{A}$ and $\mathbf{\Sigma}_{yy}$ 
+matrices for both regimes, but the specific outputs obtained in the previous analyses 
+(`OptOUs1` for the reduced regime, and `OptOUf1` for the full regime). Let us compare the likelihood with the previous analyses:
+
+```{r}
+OptOUs2$FinalFound$LogLik
+OptOUf2$FinalFound$LogLik
+```
+
+We can see that the likelihood remained the same.
+We repeat this procedure a few times (i.e. by the fifth time you use `OptOUs2` and `OptOUf2` 
+as starting points) and you will notice that the likelihood does not change, implying that we are at a
+maximum:
+
+```{r}
+OptOUs2$FinalFound$LogLik
+OptOUf2$FinalFound$LogLik
+```
+
+However, if we compare these values with the likelihoods of the top models of the wrapper function:
+
+```{r}
+OUs$BestModel$BestModel$LogLik
+OUf$BestModel$BestModel$LogLik
+```
+
+It is easy to see that the likelihood values of the former are higher. 
+We experiment what will happen if we try from a new starting point:
+
+```{r eval=FALSE, echo=TRUE}
+OUOUreStart<-mvSLOUCH::ouchModel(mvStree, mvData, predictors = c(3), Atype = "Diagonal", diagA = NULL)
+```
+
+The $\mathbf{A}$ and $\mathbf{\Sigma}_{yy}$ matrices are not strikingly different from the first attempt:
+
+```{r}
+OUOUreStart$FinalFound$ParamsInModel$A
+OUOUreStart$FinalFound$ParamsInModel$Syy
+```
+
+But let us see what happens with the likelihoods when we use these matrices as starting points for the analyses using selective regimes: 
+
+```{r eval=FALSE, echo=TRUE}
+FinalOUs1<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = strok.reg, root.regime = "generalist", predictors = c(3), Atype = OUs$BestModel$model$Atype, Syytype = OUs$BestModel$model$Syytype, diagA = OUs$BestModel$model$diagA, start_point_for_optim=list(A = OUOUreStart$FinalFound$ParamsInModel$A, Syy = OUOUreStart$FinalFound$ParamsInModel$Syy))
+FinalOUf1<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = regimesFitch$branch_regimes, root.regime = "generalist", predictors = c(3), Atype = OUf$BestModel$model$Atype, Syytype = OUf$BestModel$model$Syytype, diagA = OUf$BestModel$model$diagA, start_point_for_optim=list(A = OUOUreStart$FinalFound$ParamsInModel$A, Syy = OUOUreStart$FinalFound$ParamsInModel$Syy))
+```
+
+The likelihoods are very similar, in the first case slightly higher in the second slightly lower:
+
+```{r}
+FinalOUs1$FinalFound$LogLik
+FinalOUf1$FinalFound$LogLik
+```
+
+And if we recursively use the same matrices as starting points for new analyses:
+
+```{r eval=FALSE, echo=TRUE}
+FinalOUs2<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = strok.reg, root.regime = "generalist", predictors = c(3), Atype = OUs$BestModel$model$Atype, Syytype =OUs$BestModel$model$Syytype, diagA = OUs$BestModel$model$diagA, start_point_for_optim=list(A = FinalOUs1$FinalFound$ParamsInModel$A, Syy = FinalOUs1$FinalFound$ParamsInModel$Syy))
+FinalOUf2<-mvSLOUCH::ouchModel(mvStree, mvData, regimes = regimesFitch$branch_regimes, root.regime = "generalist", predictors = c(3), Atype = OUf$BestModel$model$Atype, Syytype = OUf$BestModel$model$Syytype, diagA = OUf$BestModel$model$diagA, start_point_for_optim=list(A = FinalOUf1$FinalFound$ParamsInModel$A, Syy = FinalOUf1$FinalFound$ParamsInModel$Syy))
+```
+
+we can see that no further improvements are possible:
+
+```{r}
+FinalOUs2$FinalFound$LogLik
+FinalOUf2$FinalFound$LogLik
+```
+
+As before the customized procedure attained a higher likelihood than the wrapper function. 
+By comparing the AICc values of these optimized models, you can notice that the reduced model is more decisively preferred this time:
+
+```{r}
+FinalOUf2$FinalFound$ParamSummary$aic.c - FinalOUs2$FinalFound$ParamSummary$aic.c
+```
+
+Confirming that the reduced model is doing a better job than the full model, and that we can focus our attention on the 
+former for interpretation. In regards to strokers, it seems like the type of motion works more effectively as 
+selective regime than the particular medium being pulled (water or soil). $\mathrm{R}^{2}$ is low, indicating that there
+is, as often in phylogenetic comparative studies, considerable variation in the data left to be still explained:
+
+```{r}
+FinalOUs2$FinalFound$ParamSummary$RSS$R2
+```
+
+So now we can go back and explore the phenomena described at the beginning using this model [(Data section)](#section2). 
+Let us start with the adaptive significance of limb morphology in terms of locomotor types. This can be explored by 
+comparing the estimated primary optima for the different niches. mvSLOUCH not only reports the estimates, but also 
+$95\%$ generalized least squares (GLS) confidence intervals conditional on $\mathbf{A}$ and diffusion matrix parameters:
+
+```{r}
+FinalOUs2$FinalFound$ParamSummary$confidence.interval$regression.summary$mPsi.regression.confidence.interval
+```
+
+This object lists the values of the primary optima (field `Estimated.Point`) as well as the lower (field `Lower.end`) and upper 
+(field `Upper.end`) bounds of the $95\%$ confidence interval. Nothing conclusive can be said about dectopectoral crest 
+(`HuPCL`) and humerus lengths (`HuL`), as the confidence intervals for the primary optima of the different niches overlap to some extent. 
+The same does not happen with radius length (`RaL`) though, where the confidence intervals reveal more distinguishable 
+differences among niches. To see this more clearly, let’s plot these estimates. First we will use the above object 
+(listing the primary optimum estimates with confidence intervals) to create a data frame (DFs) indicating the locomotor habits 
+(Ecology) as a factor, and the radius length primary optimum (`RaL`) with the lower (lower) and upper (upper) bounds of the confidence intervals:
+
+```{r}
+DFs<-data.frame(
+ Ecology=factor(colnames(FinalOUs2$FinalFound$ParamSummary$confidence.interval$regression.summary$mPsi.regression.confidence.interval$Estimated.Point)),
+  RaL=FinalOUs2$FinalFound$ParamSummary$confidence.interval$regression.summary$mPsi.regression.confidence.interval$Estimated.Point["RaL",],
+  upper=FinalOUs2$FinalFound$ParamSummary$confidence.interval$regression.summary$mPsi.regression.confidence.interval$Upper.end["RaL",],
+  lower=FinalOUs2$FinalFound$ParamSummary$confidence.interval$regression.summary$mPsi.regression.confidence.interval$Lower.end["RaL",]
+)
+```
+
+We can now create the plot with ggplot2 using this dataframe and keeping the same color coding that was 
+specified earlier to map the locomotor niches on the tree [(Lumped regimes section)](#section5_3): 
+
+```{r}
+ggplot2::ggplot(DFs, ggplot2::aes(Ecology, RaL))+
+  ggplot2::geom_point(size=4, colour=c("green","red","purple","orange","blue")) +
+    ggplot2::geom_errorbar(ggplot2::aes(ymin=lower,ymax=upper),width=0.1,lwd=1.5, colour=c("green","red","purple","orange","blue"))+
+  ggplot2::xlab("Locomotor habits")+
+  ggplot2::ylab("RaL(log)") + ggplot2::coord_flip()
+```
+
+The primary optimum for radius length is significantly higher for cursorials when compared to arboreals, generalists, and strokers. 
+Although scansorials also exhibit a low optimum, its differentiation with the cursorial locomotion is less clear as their 
+confidence intervals overlap (albeit not extensively). Recall that radius length is informative of output lever dynamics and 
+overall limb elongation [(Data section)](#section2).
+The high value of the primary optimum for cursorial carnivorans reflects large output levers and limbs that 
+tend to be long, increasing relative velocity transmissions and maximizing the distance covered by each stride (e.g. cheetahs, 
+grey wolves, spotted hyenas). Arboreal,
+generalist, and stroker carnivorans have smaller output levers that result in higher mechanical advantage, indicative of higher 
+force outputs when compared to cursorials. Not unexpectedly, arboreal and scansorial carnivorans group together in terms of the 
+primary optima, as both locomotor types involve climbing abilities. But as indicated above, the scansorial locomotor type is the least 
+differentiated with the cursorial one. This makes sense considering that some scansorial species rely on speed to some degree for 
+hunting (e.g. pumas, snow leopards), similar to cursorial carnivorans. 
+
+It seems then that the trade-off between speed and strength is well reflected in the radius of carnivorans with different locomotor 
+habits. But what happens with dectopectoral crest? Although this morphological feature is not distinguishing locomotor types as well 
+as radius length, we would expect the two variables to be at odds with each other under the trade-off scenario, considering that 
+relatively large values of the former favor high mechanical advantage, while relatively large values of the latter favor high velocity 
+transmissions. We can explore this aspect of the trade-off by inspecting the association between the two variables in more detail. 
+The evolutionary regression and overall correlations indicate that these variables are positively associated:
+
+```{r}
+FinalOUs2$FinalFound$ParamSummary$evolutionary.regression
+FinalOUs2$FinalFound$ParamSummary$corr.matrix
+```
+
+Most likely though, this positive association reflects an absolute effect due to scaling. Basically, this strong positive 
+association would indicate that as animals get larger, their limb measurements increase too. The story changes when we 
+explore the conditional regression and correlation coefficients: 
+
+```{r}
+FinalOUs2$FinalFound$ParamSummary$trait.regression
+FinalOUs2$FinalFound$ParamSummary$conditional.corr.matrix
+```
+
+Note that the association with the scaling factor (`HuL`) remains positive, but now the association of the responses 
+(`HuPCL` and `RaL`) is negative. This is, relative dectopectoral crest and humerus lengths are inversely associated, 
+consistent with the trade-off hypothesis. We can assess the strength of this pattern with confidence intervals, 
+but these are trickier to obtain for the above parameters than it was for the primary optimum. mvSLOUCH offers an alternative way 
+of estimating confidence intervals for these and many other parameters, as presented in the next section.
+
+## Parametric bootstrap 
+
+The optimized speed of the new mvSLOUCH version allows obtaining confidence intervals for a variety of parameters under 
+parametric bootstrapping. Here we will focus on the estimates linked to the trade-off pattern explored at the end of the 
+previous section (`evolutionary.regression`, `corr.matrix`, `trait.regression`, `conditional.corr.matrix`):
+
+```{r eval=FALSE, echo=TRUE}
+BT<-mvSLOUCH::parametric.bootstrap(estimated.model = FinalOUs2, phyltree = mvStree, 
+values.to.bootstrap = c("evolutionary.regression", "corr.matrix", "trait.regression", "conditional.corr.matrix"), 
+regimes = strok.reg, root.regime = "generalist", predictors = c(3), numboot = 1000, 
+Atype = OUs$BestModel$model$Atype, 
+Syytype = OUs$BestModel$model$Syytype, 
+diagA = OUs$BestModel$model$diagA)
+```
+
+The bootstrap function (`parametric.bootstrap`) uses the estimates of a fitted evolutionary model (`estimated.model`), 
+which in our case results from the optimizing procedure of the previous section (`FinalOUs2`). The function also requires the 
+specification of the phylogenetic tree (`phyltree`), the number of bootstrap samples (`numboot`), and the list of estimates for 
+which we want obtain confidence intervals (`values.to.bootstrap`). Other arguments for this function have been 
+introduced before and deal with the specification of the regime (`regimes`, `root.regime`), explanatory variable (`predictors`), 
+and model setting (`Atype`, `Syytype`, `diagA`). The bootstrap procedure will take some time and mvSLOUCH 
+will print the current iteration and the elapsed time so that you can monitor its progress. 
+When it is completed, the resulting object (BT) will hold the simulated data and model outputs of each 
+bootstrap replicate. Now we need to retrieve the confidence intervals from this object. We will do so by computing the 
+$2.5\%$ values on both tails to determine the 
+$95\%$ confidence region from the collection of estimates. Let us start with the evolutionary regression:
+
+```{r}
+BTU.EvoReg <- FinalOUs2$FinalFound$ParamSummary$evolutionary.regression
+BTU.EvoReg[] <- 0L
+BTL.EvoReg <- BTU.EvoReg
+for(i in 1:nrow(FinalOUs2$FinalFound$ParamSummary$evolutionary.regression)){
+  BT.EvoReg<-quantile(sapply(BT$bootstrapped.parameters$evolutionary.regression,function(x) 
+    x[i]), c(0.025, 0.975))
+  BTL.EvoReg[i,] <- BT.EvoReg[1]
+  BTU.EvoReg[i,] <- BT.EvoReg[2]
+}
+```
+
+The lower (`BTL.EvoReg`) and upper (`BTU.EvoReg`) bounds of the $95\%$ confidence interval for the evolutionary regression:
+
+```{r}
+BTL.EvoReg
+BTU.EvoReg
+```
+
+We can see that the confidence regions for both coefficients concentrate on positive values.
+The bootstrap procedure tends to produce wide confidence intervals, and thus is conservative. Overall, 
+the positive general association between the responses and the explanatory variable is supported by the 
+confidence intervals. Let's see if the strength of this positive association is confirmed by the correlation matrix:
+
+```{r}
+BTU.CorrMat <- rep(NA,length(as.vector(FinalOUs2$FinalFound$ParamSummary$corr.matrix)))
+BTL.CorrMat<-BTU.CorrMat
+for(i in 1:length(as.vector(FinalOUs2$FinalFound$ParamSummary$corr.matrix))){
+  BT.CorrMat<-quantile(sapply(BT$bootstrapped.parameters$corr.matrix,function(x) x[i]),c(0.025,0.975))
+  BTL.CorrMat[i] <- BT.CorrMat[1]
+  BTU.CorrMat[i] <- BT.CorrMat[2]
+}
+BTL.CorrMat <- matrix(BTL.CorrMat, nrow =
+  nrow(FinalOUs2$FinalFound$ParamSummary$corr.matrix))
+BTU.CorrMat <- matrix(BTU.CorrMat, nrow =
+  nrow(FinalOUs2$FinalFound$ParamSummary$corr.matrix))
+dimnames(BTL.CorrMat) <- dimnames(BTU.CorrMat)<-
+  list(row.names(FinalOUs2$FinalFound$ParamSummary$corr.matrix),
+      colnames(FinalOUs2$FinalFound$ParamSummary$corr.matrix))
+```
+ 
+The lower (`BTL.CorrMat`) and upper (`BTU.CorrMat`) bounds of the $95\%$ confidence interval for the correlation matrix:
+
+```{r}
+BTL.CorrMat
+BTU.CorrMat
+```
+
+The estimates confirm the evolutionary regression results, with positive correlation coefficients. These results 
+point towards a significant positive association among morphological variables, consistent with the absolute effects 
+due to scaling discussed earlier. The trade-off can be addressed by studying the conditional regression coefficients:
+
+```{r}
+NA.TrtReg<-lapply(1:length(BT$bootstrapped.parameters$trait.regression), function(x) 
+  rep(NA,length(unlist(FinalOUs2$FinalFound$ParamSummary$trait.regression))))
+BTU.TrtReg <- rep(NA, length(unlist(FinalOUs2$FinalFound$ParamSummary$trait.regression)))
+BTL.TrtReg <- BTU.TrtReg
+for(i in 1:length(unlist(FinalOUs2$FinalFound$ParamSummary$trait.regression))){
+  BT.TrtReg<-quantile(sapply(relist(unlist(BT$bootstrapped.parameters$trait.regression),
+                                     NA.TrtReg), function(x) x[i]), c(0.025, 0.975))
+  BTL.TrtReg[i] <- BT.TrtReg[1]
+  BTU.TrtReg[i] <- BT.TrtReg[2]
+}
+BTL.TrtReg <- relist(BTL.TrtReg, FinalOUs2$FinalFound$ParamSummary$trait.regression)
+BTU.TrtReg <- relist(BTU.TrtReg, FinalOUs2$FinalFound$ParamSummary$trait.regression)
+```
+
+The lower (`BTL.TrtReg`) and upper (`BTU.TrtReg`) bounds of the $95\%$ confidence interval for the conditional regression coefficients:
+
+```{r}
+BTL.TrtReg
+BTU.TrtReg
+```
+
+The negative association of the responses (`HuPCL` and `RaL`) cannot be considered significant as the confidence intervals include a 
+large range of positive values. Let us see if the conditional correlation matrix confirms this result:
+
+```{r}
+BTU.CondCorr <-
+  rep(NA,length(as.vector(FinalOUs2$FinalFound$ParamSummary$conditional.corr.matrix)))
+BTL.CondCorr<-BTU.CondCorr 
+for(i in 1:length(as.vector(FinalOUs2$FinalFound$ParamSummary$conditional.corr.matrix))){
+  BT.CondCorr<-quantile(sapply(BT$bootstrapped.parameters$conditional.corr.matrix,function(x) x[i]),c(0.025,0.975))
+  BTL.CondCorr[i] <- BT.CondCorr[1]
+  BTU.CondCorr[i] <- BT.CondCorr[2]
+}
+BTL.CondCorr <- matrix(BTL.CondCorr, nrow = 
+  nrow(FinalOUs2$FinalFound$ParamSummary$conditional.corr.matrix))
+BTU.CondCorr<-matrix(BTU.CondCorr,nrow =
+  nrow(FinalOUs2$FinalFound$ParamSummary$conditional.corr.matrix))
+dimnames(BTL.CondCorr)<-dimnames(BTU.CondCorr)<-list(row.names(FinalOUs2$FinalFound$ParamSummary$conditional.corr.matrix), 
+  colnames(FinalOUs2$FinalFound$ParamSummary$conditional.corr.matrix))
+```
+
+The lower (`BTL.CondCorr`) and upper (`BTU.CondCorr`) bounds of the $95\%$ confidence interval for the conditional correlation matrix:
+
+```{r}
+BTL.CondCorr
+BTU.CondCorr
+```
+
+Indeed, the conditional correlation between response variables includes a wide range of positive values in its confidence 
+interval, and thus the negative association cannot be considered significant. Although this rejects the trade-off hypothesis 
+between dectopectoral crest and radius lengths, it is important to keep in mind that these bootstrap confidence intervals are 
+conservative. The trade-off might be present in the data, albeit weakly. The weakness of the trade-off could be also associated 
+with a suboptimal selective regime specification. The locomotor categories assigned here are convenient because they belong 
+to the same body of data as the morphological variables [@JSamJMeaSSak2013]. 
+However, the assignation of @JSamJMeaSSak2013, which is based on the proportion of time spent using 
+different locomotor modes, generates some groupings that do not necessarily reflect similarity of motion in the 
+forelimbs. For example, the polar bear (*Ursus maritimus*) is classified as semiaquatic, grouping this species with the 
+otters, despite differences in limb usage by these taxa both on water and on land. Similarly, the generalist 
+classification of the wolverine (*Gulo gulo*) might not reflect the digging capabilities of this species very well, 
+particularly in the snow. Although the proportion of time spent in various locomotor modes is informative, a selective 
+regime specification more tuned to the role of the forelimbs during motion might have the potential of revealing a clearer 
+trade-off between relative dectopectoral crests and radius lengths. For now, though, all we can say is that the trade-off 
+is better reflected by contrasting the radius of different locomotor types than by contrasting this structure with the 
+dectopectoral crest.
+
+
+# References
+

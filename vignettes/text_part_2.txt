@@ -1,0 +1,88 @@
+<!--
+# Copyright 2020 Jesualdo Fuentes Gonzalez, Jason Pienaar  and Krzysztof Bartoszek
+#
+# This file is part of mvSLOUCH.
+#
+# mvSLOUCH is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# mvSLOUCH comes AS IS in the hope that it will be useful WITHOUT 
+# ANY WARRANTY, NOT even the implied warranty of MERCHANTABILITY 
+# or FITNESS FOR A PARTICULAR PURPOSE. Please understand that there 
+# may still be bugs and errors. Use it at your own risk. We take no 
+# responsibility for any errors or omissions in this package or 
+# for any misfortune that may befall you or others as a result 
+# of its use. See the  GNU General Public License for more details.
+# Please send comments and report bugs to Krzysztof Bartoszek 
+# at krzbar@protonmail.ch .
+#
+# You should have received a copy of the GNU General Public License
+# along with mvSLOUCH.  If not, see <https://www.gnu.org/licenses/>.
+-->
+
+
+```{r}
+unlink(temp)
+Urocyon_cinereoargenteus_duplicated<-which(dfcarnivores_postcranial[,2]=="Urocyon cinereoargenteus")[2]
+dfcarnivores_postcranial<-dfcarnivores_postcranial[-Urocyon_cinereoargenteus_duplicated,]
+v_species_to_remove<-c("Bdeogale crassicauda","Lycalopex sp.","Daphoenus vetus","Barbourofelis loveorum","Archaeocyon leptodus","Canis armbrusteri","Canis dirus","Canis latrans orcutti","Canis lupus (Pleistocene)","Desmocyon thomsoni","Hesperocyon gregarius","Mesocyon coryphaeus","Paraenhydrocyon josephi","Phlaocyon leucosteus","Vulpes macrotis (Pleistocene)","Vulpes vulpes (Pleistocene)","Homotherium ischyrus","Homotherium serum","Leopardus wiedii (Pleistocene)","Lynx rufus (Pleistocene)","Miracinonyx inexpectatus","Panthera atrox","Puma concolor (Pleistocene)","Puma lacustris","Smilodon fatalis","Miacis gracilis","Mephitis mephitis (Pleistocene)","Spilogale gracilis (Pleistocene)","Spilogale putorius (Pleistocene)","Gulo gulo (Pleistocene)","Martes americana (Pleistocene)","Martes nobilis (Pleistocene)","Mustela nigripes (Pleistocene)","Neovison frenata (Pleistocene)","Neovison vison (Pleistocene)","Satherium piscinarium","Taxidea taxus (Pleistocene)","Dinictis felina","Dinictis major","Hoplophoneus primaevus","Nimravus brachyops","Agriotherium africanum","Arctodus simus","Ursus arctos (Pleistocene)")
+v_indices_to_remove<-which(sapply(dfcarnivores_postcranial[,2],function(x,v_species_to_remove){is.element(x,v_species_to_remove)},v_species_to_remove=v_species_to_remove,simplify=TRUE))
+dfcarnivores_postcranial<-dfcarnivores_postcranial[-v_indices_to_remove,]
+m_names_change<-rbind(c("Alopex lagopus","Vulpes lagopus"),c("Lycalopex gymnocerus","Lycalopex gymnocercus"),c("Caracal serval","Leptailurus serval"),c("Felis silvestris libyca","Felis silvestris"),c("Atilax palundinosus","Atilax paludinosus"),c("Gallerella pulverulenta","Galerella pulverulenta"),c("Gallerella sanguinea","Galerella sanguinea"),c("Conepatus mesoleucus","Conepatus leuconotus"),c("Mephitis macroura vittata","Mephitis macroura"),c("Aonyx cinereus","Aonyx cinerea"),c("Paradoxurus hemaphroditus","Paradoxurus hermaphroditus"))
+for (i in 1:nrow(m_names_change)){
+    dfcarnivores_postcranial[which(dfcarnivores_postcranial[,2]==m_names_change[i,1]),2]<-m_names_change[i,2]
+}
+dfcarnivores_postcranial[,2]<-gsub(" ", "_", dfcarnivores_postcranial[,2])
+row.names(dfcarnivores_postcranial)<-dfcarnivores_postcranial[,2]
+dat<-dfcarnivores_postcranial[,c("Ecology","HuL","HuPCL","RaL")]
+```
+
+The subset consists of a categorization of locomotor habits (Ecology) and three variables associated with forelimb morphology, 
+measured in mm (`HuL` = humerus length; `HuPCL` = deltopectoral crest length; `RaL` = radius length):
+
+```{r}
+head(dat)
+```
+
+The categorical variable includes six different locomotor preferences (generalist, scansorial, arboreal, semiaquatic, semifossorial, 
+cursorial). The three morphological variables are functionally interesting because a larger dectopectoral crest relative to humerus 
+length is indicative of a large shoulder moment, which facilitates mechanical advantage of the deltoid and pectoral muscles 
+acting across the shoulder joint. 
+A larger radius relative to humerus length is indicative of distal segments that are longer than proximal segments
+reflecting a large output lever (linked to high relative velocity transmissions) and overall limb elongation. 
+The relative lengths of the radius and the dectopectoral crest are thus informative of speed and strength maximization where humerus 
+length operates effectively as a scaling factor for both attributes. This setup can be explored in mvSLOUCH through multivariate 
+models in which the lengths of the dectopectoral crest and the radius are specified as responses, and the length of the humerus is 
+specified as explanatory variable in those models that allow continuous predictors 
+[(fundamentally OUBM models; see  OUBM Section)](#section4_2).
+
+@JSamJMeaSSak2013 included $107$ extant carnivoran taxa in their dataset, but here we use a reduced subset of 
+species after removing those which phenotypic data were not complete, defined at the species level, 
+or available in the phylogenetic tree. 
+The phylogeny is pruned from the mammalian calibrated tree presented by @SHedJMarMSulMPaySKum2015, 
+which we download from the supplementary material made available at the 
+Center for Biodiversity ( http://www.biodiversitycenter.org/ttol ). Then we rename species according 
+to @DWilDRee2005 and @WJohetal2006 for taxonomic matching, remove the tips not 
+present in our phenotypic data, and finally arrange the rows in our data matrix according to the order of the tips in the phylogeny.
+In this case the last step is not actually needed but in general such a reordering is recommended for users
+to make sure the data correspond to the appropriate tips of the phylogeny. 
+
+```{r}
+b_correct_tree_download<-FALSE
+tryCatch({
+phyltree_mammals<-ape::read.tree("http://www.biodiversitycenter.org/files/ttol/8.TTOL_mammals_unsmoothed.nwk")
+b_correct_tree_download<-TRUE
+},error=function(e){cat("Could not download tree file! No analysis can be done! Vignette not built!")},
+warning=function(w){cat("Problem with downloading tree file! No analysis can be done! Vignette not built!")}
+)
+```
+
+```{r conditional_print_part3, child='text_part_3.txt', eval=b_correct_tree_download}
+```
+
+```{r conditional_print_treeerror, eval=!b_correct_tree_download, echo=FALSE}
+cat("Error: Could not download tree file! No analysis can be done! Vignette not built!")
+```
+
