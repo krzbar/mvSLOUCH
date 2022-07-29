@@ -1,0 +1,29 @@
+Package: mvSLOUCH
+Type: Package
+Title: Multivariate Stochastic Linear Ornstein-Uhlenbeck Models for
+        Phylogenetic Comparative Hypotheses
+Version: 2.7.5
+Date: 2022-07-26
+Authors@R: c(person(family="Bartoszek",given="Krzysztof",role=c("cre","aut"),email="krzbar@protonmail.ch"),
+	    person(family="Clarke", given="John", email="j.clarke.paleo@gmail.com",role=c("ctb")),
+	    person(family="Fuentes-Gonzalez", given="Jesualdo", email="jafuentesgonzalez@ua.edu",role=c("ctb")),
+	    person(family="Pienaar", given="Jason", email="jason.pienaar@ua.edu",role=c("ctb")))
+Maintainer: Krzysztof Bartoszek <krzbar@protonmail.ch>
+Description: Fits multivariate Ornstein-Uhlenbeck types of models to continues trait data from species related by a common evolutionary history. See K. Bartoszek, J, Pienaar, P. Mostad, S. Andersson, T. F. Hansen (2012) <doi:10.1016/j.jtbi.2012.08.005>. The suggested PCMBaseCpp package (which significantly speeds up the likelihood calculations) can be obtained from <https://github.com/venelin/PCMBaseCpp/>.
+Depends: R(>= 3.5.0), abind
+License: GPL (>= 2) | file LICENCE
+LazyLoad: yes
+Collate: bootstrap.R evolmodelest.R matrixexps.R phylgls.R
+        sdecovariancephyl.R wrappers.R ci.R fitch.mvsl.R
+        calls_to_matrixcalc.R
+        matrixparametrizations.R PhyloSDEestim.R sdemoments.R estimBM.R
+        getESS.R modelparams.R phyltree_paths.R simulVasicekprocphyl.R
+        estimGLSGC.R loglik.R modelparamssummary.R precalcs.R
+        simulVasicekproc.R estimMAXLIK.R make.states.mvsl.R
+        modelparamstransform.R regimes.R trees2slouch.mvsl.R
+        simulclustphyl.R OUphylregression.R sdemeanphyl.R 
+Imports: ape (>= 5.3), graphics, methods, mvtnorm, Matrix, 
+        ouch, PCMBase (>= 1.2.10), stats, matrixcalc
+Suggests: PCMBaseCpp (>= 0.1.9), ggplot2, knitr, rmarkdown, mvMORPH, testthat
+VignetteBuilder: knitr, rmarkdown
+NeedsCompilation: no

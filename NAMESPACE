@@ -1,0 +1,26 @@
+# Export all names
+# exportPattern(".")
+
+# S3 methods
+S3method(plot, clustered_phylo)
+
+# exported functions
+export(BrownianMotionModel,drawPhylProcess,estimate.evolutionary.model,fitch.mvsl,generate.model.setups,mvslouchModel,ouchModel,parametric.bootstrap,phyltree_paths,plot.clustered_phylo,simulate_clustered_phylogeny,simulBMProcPhylTree,simulMVSLOUCHProcPhylTree,simulOUCHProcPhylTree,SummarizeBM,SummarizeMVSLOUCH,SummarizeOUCH,OU_RSS,OU_xVz,OU_phylreg)
+
+# Import all packages listed as Imports or Depends
+importFrom(mvtnorm, rmvnorm)
+importFrom(ape, rtree, node.depth.edgelength, drop.tip, plot.phylo, rphylo)
+importFrom(ouch, ape2ouch)
+importFrom(stats, cov, cov2cor, lm, nlminb, optim, qnorm, qt, rexp, rnorm, runif)
+importFrom(graphics, abline, legend, mtext, par, plot, points)
+importFrom(PCMBase, PCM, PCMParamCount ,PCMCreateLikelihood, PCMLik, PCMParamLoadOrStore, PCMOptions)
+importFrom("methods", "as")
+importFrom(Matrix,nearPD)
+importFrom(abind, abind)
+importFrom(matrixcalc, is.diagonal.matrix, is.positive.definite,  is.positive.semi.definite, is.singular.matrix, is.symmetric.matrix)
+
+
+
+
+
+
