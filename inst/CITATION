@@ -1,0 +1,26 @@
+citHeader("To cite the mvSLOUCH package in publications use:")
+
+citEntry(
+         entry="Article",
+         author=personList(
+           as.person("Krzysztof Bartoszek"),
+           as.person("Jason Pienaar"),
+           as.person("Petter Mostad"),
+           as.person("Staffan Andersson"),
+           as.person("Thomas F. Hansen")
+           ),
+         title="A phylogenetic comparative method for studying  multivariate adaptation",
+         journal="Journal of Theoretical Biology",
+         year=2012,
+         volume=314,
+         pages="204--215",
+         textVersion=paste(
+         "Bartoszek, K. and Pienaar, J. and Mostad. P. and Andersson, S. and Hansen, T. F. (2012)",
+	 "A phylogenetic comparative method for studying  multivariate adaptation",
+	 "J. Theor. Biol. 314:204--215"
+           )
+         )
+
+citFooter("As mvSLOUCH is continually evolving, you may want to cite its version number. Find it with 'help(package=mvSLOUCH)'.")
+
+
