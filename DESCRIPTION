@@ -2,8 +2,8 @@ Package: mvSLOUCH
 Type: Package
 Title: Multivariate Stochastic Linear Ornstein-Uhlenbeck Models for
         Phylogenetic Comparative Hypotheses
-Version: 2.7.5
-Date: 2022-07-26
+Version: 2.7.6
+Date: 2023-07-05
 Authors@R: c(person(family="Bartoszek",given="Krzysztof",role=c("cre","aut"),email="krzbar@protonmail.ch"),
 	    person(family="Clarke", given="John", email="j.clarke.paleo@gmail.com",role=c("ctb")),
 	    person(family="Fuentes-Gonzalez", given="Jesualdo", email="jafuentesgonzalez@ua.edu",role=c("ctb")),
