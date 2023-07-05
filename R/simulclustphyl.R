@@ -137,7 +137,7 @@ simulate_clustered_phylogeny<-function(v_sizeclusts,joining_branchlengths=NULL,f
     p_joined$edge[which(p_joined$edge>(numclusts+1))]<-p_joined$edge[which(p_joined$edge>(numclusts+1))]+numalltips
     p_joined$edge[which(p_joined$edge==(numclusts+1))]<-numalltips+1 ## final root node
     p_joined$edge[which(p_joined$edge<=numclusts)]<-p_joined$edge[which(p_joined$edge<=numclusts)]+numalltips+1
-    labelfirstnodeinsubtree<-numalltips+2*numclusts
+    labelfirstnodeinsubtree<-numalltips+joiningphyl$Nnode+length(joiningphyl$tip.label)+1
     p_joined$edges_clusters<-vector("list",numclusts+1)
     p_joined$tips_clusters<-vector("list",numclusts)
     names(p_joined$edges_clusters)<-c("joining_tree",paste0("cluster_",1:numclusts))
