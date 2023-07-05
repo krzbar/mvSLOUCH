@@ -178,7 +178,7 @@ simulate_clustered_phylogeny<-function(v_sizeclusts,joining_branchlengths=NULL,f
         p_joined$edge.length<-c(p_joined$edge.length,pnext$edge.length)
     }		
     ## change p_joined$Nnode
-    p_joined$Nnode<-numalltips-1
+    p_joined$Nnode<-length(unique(p_joined$edge[,1]))
     ## label tips correctly
     p_joined$tip.label<-paste0("t",1:numalltips)
     class(p_joined)<-c("clustered_phylo","phylo")
